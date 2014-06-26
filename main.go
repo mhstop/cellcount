@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sort"
 	"strconv"
+	"math"
 	"github.com/garyburd/redigo/redis"
 )
 
@@ -72,9 +73,12 @@ func searchAndDestroy(key int64) {
 	// Scan the database to find all entries starting with provided key
 	// Write line with count computed for cell by Hyperloglog
 	// Delete keys
+/*
+	if _, err := c.Do("SCAN", redis.Args{}.Add("id1").AddFlat(&p1)...); err != nil {
+	   	panic(err)
+	}
 	
-	/*
-			s, err := redis.String(c.Do("scan", key))
+			s, err := redis.String(c.Do("scan ", key))
 
 			count, err = redis.Uint64(cnx.Do("PFCOUNT", key))		
 			if err != nil {
@@ -82,7 +86,8 @@ func searchAndDestroy(key int64) {
 			} else {
 				fmt.Printf("Redis: %s = %d\n", key, count)
 			}
-	*/		
+*/
+
 }
 
 
@@ -133,6 +138,7 @@ func processFile(inFile string) error {
 	var _ = count
 	
 	count = 0
+	var pipeCount float64 = 0
 	
 	startTime := time.Now()
 	fmt.Printf("%s - %s Procesing starts ", startTime.Format("2006/01/2 - 15:04:05"), inFile)
@@ -156,12 +162,34 @@ func processFile(inFile string) error {
 				
 //		fmt.Printf("     %d - Time=%s Key=%s Imsi=%s\n", i, tt.String(), key, imsi)
 		// Add imsi value for that key (Time:Cell) value to Redis
-		c.Do("PFADD", key, imsi)
-	
+		
+		//Manage Pipeline of command
+		if pipeCount == 0 {
+			c.Send("Multi")
+		} else { // we have a least one command in pipe
+			if math.Mod(pipeCount, 20000) == 0.0 {
+				pipeCount = 0
+				_, err := c.Do("EXEC")
+				// fmt.Print("exec")
+				check (err)
+				c.Send("Multi")
+			}
+		}
+		 // just add one more command
+		c.Send ("PFADD", key, imsi)
+		pipeCount += 1
+
 		// Next line
      	row, err = r.Read()
 		i += 1 
 	}
+	
+	// Still stuff in pipe to finish?
+	if pipeCount != 0 {
+		_, err := c.Do("EXEC")
+		check (err)
+	}
+	
 	endTime := time.Now()
 	duration := endTime.Sub(startTime)
 		
