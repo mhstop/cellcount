@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sort"
 	"strconv"
-	"math"
-	"github.com/garyburd/redigo/redis"
+	"crypto"
+	"github.com/eclesh/hyperloglog"
 )
 
 // Structure to hold filenames to be ordered by the time part
@@ -37,6 +37,12 @@ func (this Events) Swap(i, j int) {
 }
 
 
+// Structure to hold Map of HLL and time
+type CellMap struct {
+	f string
+	m map[string]*hyperloglog.HyperLogLog
+}
+
 // Dum error checking function
 
 func check(e error) {
@@ -48,11 +54,11 @@ func check(e error) {
 // Function called to create a summary file for Key with same Timestamp 
 // and then delete all those eys from DB
 
-func searchAndDestroy(key int64) {
+func searchAndDestroy(cm *CellMap) {
 	
 	// Open output file for Key
 	
-		filename := fmt.Sprintf("/Volumes/BigBud/data/vf/results/%d.txt", key)
+		filename := fmt.Sprintf("/Volumes/BigBud/data/vf/results/%s.csv", cm.f)
 	   	file, err := os.Create(filename)
 	   	check(err)
 	   	defer file.Close()
@@ -60,33 +66,20 @@ func searchAndDestroy(key int64) {
 		// Write Headers
 	    _, err = file.WriteString("Cell, Count\n")
 	
+		// Loop on the map of hll to get count for cell
+		for key, value := range cm.m {
+		    _, err = file.WriteString(fmt.Sprintf("%s, %d\n", key, value.Count()))
+			check(err)
+		}
+		// ToDo: should we delete the structure???
+		// delete cm
 		// Issue a Sync to flush writes to stable storage.
 	    file.Sync()
 	
-	// Get Connection from the pool. Only way to be thread-safe with Redis
-		c := pool.Get()	
-		if c == nil {
-				log.Fatal("Cannot get connection from Redis Pool")
-		}
-		defer c.Close()
 	
-	// Scan the database to find all entries starting with provided key
+	// Scan the map of HLL for the set and write down the values
 	// Write line with count computed for cell by Hyperloglog
 	// Delete keys
-/*
-	if _, err := c.Do("SCAN", redis.Args{}.Add("id1").AddFlat(&p1)...); err != nil {
-	   	panic(err)
-	}
-	
-			s, err := redis.String(c.Do("scan ", key))
-
-			count, err = redis.Uint64(cnx.Do("PFCOUNT", key))		
-			if err != nil {
-				fmt.Println("Can't find key: " + key)			fmt.Println("Error: ")
-			} else {
-				fmt.Printf("Redis: %s = %d\n", key, count)
-			}
-*/
 
 }
 
@@ -94,7 +87,7 @@ func searchAndDestroy(key int64) {
 // Function listen for Timestamps ready to be summarized
 // and then cleaned-up
 
-func listenUp(channel chan int64, count int) {
+func listenUp(channel chan *CellMap, count int) {
 	
 	for key := range channel {
 		searchAndDestroy(key)
@@ -104,14 +97,7 @@ func listenUp(channel chan int64, count int) {
 // Read all the files names in all directories from provided root
 // Return an ordered list of file names to process
 
-func processFile(inFile string) error {
-
-// Get Connection from the pool. Only way to be thread-safe with Redis
-	c := pool.Get()	
-	if c == nil {
-			log.Fatal("Cannot get connection from Redis Pool")
-	}
-	defer c.Close()
+func processFile(inFile string, cm *CellMap) error {
 		
 //	println(">> Processing: ", inFile)
 	file, err := os.Open(inFile) // For read access.
@@ -139,55 +125,44 @@ func processFile(inFile string) error {
 	
 	count = 0
 	var pipeCount float64 = 0
-	
+	var tt time.Time
+
 	startTime := time.Now()
 	fmt.Printf("%s - %s Procesing starts ", startTime.Format("2006/01/2 - 15:04:05"), inFile)
  	
 	for (err != io.EOF) && (len(row) >1) {
-		
-		// Could optimize in the case of 5mins files (always same round t)
-		// But will break if process larger files
-		
-		utime, _ := strconv.ParseInt(row[1], 10, 64)
-		
-		t := time.Unix(utime, 0).In(time.UTC)
-		
-		// t, _ := time.Parse(time.RFC3339, row[0])
-		
-		// Could use Truncate to take lower interval
-		tt := t.Truncate(5 * time.Minute)
-	
-		key := fmt.Sprintf("%d:%s", tt.Unix(), row[3])
-		imsi := row[2]
-				
-//		fmt.Printf("     %d - Time=%s Key=%s Imsi=%s\n", i, tt.String(), key, imsi)
+
 		// Add imsi value for that key (Time:Cell) value to Redis
+		// Create a set per key with all the cell for that period
 		
-		//Manage Pipeline of command
 		if pipeCount == 0 {
-			c.Send("Multi")
-		} else { // we have a least one command in pipe
-			if math.Mod(pipeCount, 20000) == 0.0 {
-				pipeCount = 0
-				_, err := c.Do("EXEC")
-				// fmt.Print("exec")
-				check (err)
-				c.Send("Multi")
-			}
+		// Optimize in the case of 5mins files take the time of the first line (rounded)
+		// This will break if files contain more than 5 mins splits
+			utime, _ := strconv.ParseInt(row[1], 10, 64)
+			t := time.Unix(utime, 0).In(time.UTC)
+			tt = t.Truncate(5 * time.Minute)	
+			_ = tt
+//			set = fmt.Sprintf("set:%d", tt.Unix())
 		}
-		 // just add one more command
-		c.Send ("PFADD", key, imsi)
+
+		key := row[3] // Cell
+		imsi, _ := strconv.ParseUint(row[2], 10, 64)
+		hll, ok := cm.m[key]
+		if ok {
+			hll.Add(uint32(imsi))	
+		} else { // not found
+			hll, err := hyperloglog.New(8192)
+			check(err)
+			hll.Add(uint32(imsi))
+			fmt.Printf("add Imsi: %d - %d\n", imsi, uint32(imsi))
+			cm.m[key] = hll	
+		}
+
 		pipeCount += 1
 
 		// Next line
      	row, err = r.Read()
 		i += 1 
-	}
-	
-	// Still stuff in pipe to finish?
-	if pipeCount != 0 {
-		_, err := c.Do("EXEC")
-		check (err)
 	}
 	
 	endTime := time.Now()
@@ -202,63 +177,12 @@ func processFile(inFile string) error {
 	return nil
 }
 
-// Utility function to allocate pool
-
-func newPool(server, password string) *redis.Pool {
-    return &redis.Pool{
-        MaxIdle: 3,
-        IdleTimeout: 240 * time.Second,
-        Dial: func () (redis.Conn, error) {
-            c, err := redis.Dial("tcp", server)
-            if err != nil {
-                return nil, err
-            }
-			if password != "" {
-            	if _, err := c.Do("AUTH", password); err != nil {
-                	c.Close()
-                	return nil, err
-            	}
-			}
-            return c, err
-        },
-        TestOnBorrow: func(c redis.Conn, t time.Time) error {
-            _, err := c.Do("PING")
-            return err
-        },
-    }
-}
-
-// Global variables
-
-var (
-    pool *redis.Pool
-    redisServer = "localhost:6379"
-    redisPassword = ""
-)
-
 // Main function
 func main() {
-
+	
 // Create Channel for inter routine communication
-	channel := make (chan int64, 10)
-	
-// Open Connection to Redis Server
-//	const proto = "tcp"
-//	const port = ":6379"
-//	c, err := redis.Dial(proto, port)
-	
-	pool = newPool(redisServer, redisPassword)
+	channel := make (chan *CellMap, 10)
 
-	if pool == nil {
-			log.Fatal("Cannot Create Redis Pool")
-	}
-
-// Get Connection from the pool. Only way to be thread-safe with Redis
-	c := pool.Get()	
-	if c == nil {
-			log.Fatal("Cannot get connection from Redis Pool")
-	}
-	defer c.Close()
 	
 	// Create list of file to be processed
 	eList := make(Events, 0, 100)
@@ -277,10 +201,13 @@ func main() {
 			t, err := time.ParseInLocation("20060102:150405", sDate, time.UTC)
 			if err != nil {
 				fmt.Println(err)
-				log.Fatal("Abort: Bad Filename with date: ", sDate)
+// Avoid fatal on result file name that has different structure
+//				log.Fatal("Abort: Bad Filename with date: ", sDate)
+			} else {
+				e := Event{aPath, t}
+				eList = append(eList, e)				
 			}
-			e := Event{aPath, t}
-			eList = append(eList, e)
+
 		}
 		return nil
 	})
@@ -301,20 +228,34 @@ func main() {
 	
 	var pTime time.Time
 	
+	var cm *CellMap = nil
+ 
 	if eList.Len() > 0 {
 		pTime = eList[0].ts
+		cm = new(CellMap)
+		slice := strings.Split(path.Base(eList[0].path), ".")
+		sDate := slice[0] +"-"+ slice[1]
+		cm.f = sDate
+		cm.m = make(map[string]*hyperloglog.HyperLogLog)
 	}
 		
 	for _, v := range eList {
 
 		if pTime != v.ts {
 			fmt.Printf("Process time %s with key: %d\n", pTime, pTime.Unix())
-			channel <- pTime.Unix()
+			channel <- cm
 			pTime = v.ts
+			// Initialize new cm for next batch of 5 min
+			cm = nil
+			cm = new(CellMap)
+			slice := strings.Split(path.Base(v.path), ".")
+			sDate := slice[0] +"-"+ slice[1]
+			cm.f = sDate
+			cm.m = make(map[string]*hyperloglog.HyperLogLog)
 		}		
+				
+		err := processFile(v.path, cm)
 		
-//		fmt.Printf ("Processing: %s - %s\n", v.ts, v.path)		
-		err := processFile(v.path)
 		
 		if err != nil {
 			log.Fatal(err)
