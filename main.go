@@ -139,44 +139,44 @@ func processFile(inFile string) error {
 	
 	count = 0
 	var pipeCount float64 = 0
-	
+	var tt time.Time
+//	var set string
 	startTime := time.Now()
 	fmt.Printf("%s - %s Procesing starts ", startTime.Format("2006/01/2 - 15:04:05"), inFile)
  	
 	for (err != io.EOF) && (len(row) >1) {
 		
-		// Could optimize in the case of 5mins files (always same round t)
-		// But will break if process larger files
 		
-		utime, _ := strconv.ParseInt(row[1], 10, 64)
-		
-		t := time.Unix(utime, 0).In(time.UTC)
-		
-		// t, _ := time.Parse(time.RFC3339, row[0])
-		
-		// Could use Truncate to take lower interval
-		tt := t.Truncate(5 * time.Minute)
-	
-		key := fmt.Sprintf("%d:%s", tt.Unix(), row[3])
-		imsi := row[2]
 				
-//		fmt.Printf("     %d - Time=%s Key=%s Imsi=%s\n", i, tt.String(), key, imsi)
 		// Add imsi value for that key (Time:Cell) value to Redis
+		// Create a set per key with all the cell for that period
 		
 		//Manage Pipeline of command
+		
 		if pipeCount == 0 {
+		// Optimize in the case of 5mins files take the time of the first line (rounded)
+		// This will break if files contain more than 5 mins splits
+			utime, _ := strconv.ParseInt(row[1], 10, 64)
+			t := time.Unix(utime, 0).In(time.UTC)
+			tt = t.Truncate(5 * time.Minute)	
+//			set = fmt.Sprintf("set:%d", tt.Unix())			
+			// Init pipeline
 			c.Send("Multi")
-		} else { // we have a least one command in pipe
-			if math.Mod(pipeCount, 20000) == 0.0 {
+		} // we have a least one command in pipe
+
+		key := fmt.Sprintf("%d:%s", tt.Unix(), row[3])
+		imsi := row[2]
+		
+		if math.Mod(pipeCount, 5000) == 0.0 && pipeCount != 0 {
 				pipeCount = 0
 				_, err := c.Do("EXEC")
-				// fmt.Print("exec")
 				check (err)
 				c.Send("Multi")
-			}
 		}
+		
 		 // just add one more command
 		c.Send ("PFADD", key, imsi)
+//		c.Send ("SADD", set, row[3])
 		pipeCount += 1
 
 		// Next line
