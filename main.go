@@ -145,13 +145,9 @@ func processFile(inFile string) error {
 	fmt.Printf("%s - %s Procesing starts ", startTime.Format("2006/01/2 - 15:04:05"), inFile)
  	
 	for (err != io.EOF) && (len(row) >1) {
-		
-		
-				
+
 		// Add imsi value for that key (Time:Cell) value to Redis
 		// Create a set per key with all the cell for that period
-		
-		//Manage Pipeline of command
 		
 		if pipeCount == 0 {
 		// Optimize in the case of 5mins files take the time of the first line (rounded)
