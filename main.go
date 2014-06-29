@@ -12,8 +12,10 @@ import (
 	"strings"
 	"sort"
 	"strconv"
-	"crypto"
+	"encoding/binary"
+	"hash"
 	"github.com/eclesh/hyperloglog"
+	"github.com/spaolacci/murmur3"
 )
 
 // Structure to hold filenames to be ordered by the time part
@@ -98,7 +100,11 @@ func listenUp(channel chan *CellMap, count int) {
 // Return an ordered list of file names to process
 
 func processFile(inFile string, cm *CellMap) error {
-		
+
+// Create Hash function
+	var m32 hash.Hash32 = murmur3.New32()
+	buf32 := make([]byte, 8)
+				
 //	println(">> Processing: ", inFile)
 	file, err := os.Open(inFile) // For read access.
 	
@@ -149,12 +155,15 @@ func processFile(inFile string, cm *CellMap) error {
 		imsi, _ := strconv.ParseUint(row[2], 10, 64)
 		hll, ok := cm.m[key]
 		if ok {
-			hll.Add(uint32(imsi))	
+			_ = binary.PutUvarint(buf32, imsi)
+			m32.Write(buf32)
+			hll.Add(m32.Sum32())	
 		} else { // not found
 			hll, err := hyperloglog.New(8192)
 			check(err)
-			hll.Add(uint32(imsi))
-			fmt.Printf("add Imsi: %d - %d\n", imsi, uint32(imsi))
+			_ = binary.PutUvarint(buf32, imsi)
+			m32.Write(buf32)
+			hll.Add(m32.Sum32())
 			cm.m[key] = hll	
 		}
 
@@ -179,7 +188,7 @@ func processFile(inFile string, cm *CellMap) error {
 
 // Main function
 func main() {
-	
+		
 // Create Channel for inter routine communication
 	channel := make (chan *CellMap, 10)
 
