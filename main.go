@@ -227,10 +227,13 @@ func main() {
 	// Breaks on 5 min boundaries to geterate cumulated result file and purge redis for those keys
 	// Need to slow down ingestion process if too much data being inserted
 	
-//	var count int = 0
+	//	var count int = 0
 	
 	startTime := time.Now()
-	fmt.Println("Let's get started: ", startTime)	
+	
+	
+	fmt.Print("Let's get started: ", startTime)	
+	fmt.Printf(" with %d files to process\n", eList.Len())
 	
 	// Initialize first timestamp
 	
