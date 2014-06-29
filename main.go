@@ -159,7 +159,7 @@ func processFile(inFile string, cm *CellMap) error {
 			m32.Write(buf32)
 			hll.Add(m32.Sum32())	
 		} else { // not found
-			hll, err := hyperloglog.New(8192)
+			hll, err := hyperloglog.New(16384)
 			check(err)
 			_ = binary.PutUvarint(buf32, imsi)
 			m32.Write(buf32)
@@ -228,7 +228,7 @@ func main() {
 	// Breaks on 5 min boundaries to geterate cumulated result file and purge redis for those keys
 	// Need to slow down ingestion process if too much data being inserted
 	
-	var count int = 0
+//	var count int = 0
 	
 	startTime := time.Now()
 	fmt.Println("Let's get started: ", startTime)	
@@ -269,10 +269,11 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		
 		// For test only
-		if count += 1; count > 10000 {
-			break
-		}
+//		if count += 1; count > 100 {
+//			break
+//		}
 	}
 
 // Close all and Cleanup
