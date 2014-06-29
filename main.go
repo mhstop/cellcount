@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strconv"
 	"encoding/binary"
-	"hash"
 	"github.com/eclesh/hyperloglog"
 	"github.com/spaolacci/murmur3"
 )
@@ -102,8 +101,8 @@ func listenUp(channel chan *CellMap, count int) {
 func processFile(inFile string, cm *CellMap) error {
 
 // Create Hash function
-	var m32 hash.Hash32 = murmur3.New32()
-	buf32 := make([]byte, 8)
+//	var m32 hash.Hash32 = murmur3.New32()
+	buf64 := make([]byte, 8)
 				
 //	println(">> Processing: ", inFile)
 	file, err := os.Open(inFile) // For read access.
@@ -152,18 +151,22 @@ func processFile(inFile string, cm *CellMap) error {
 
 		key := row[3] // Cell
 		imsi, _ := strconv.ParseUint(row[2], 10, 64)
+		_ = binary.PutUvarint(buf64, imsi)
+//		m32.Write(buf64)
 		hll, ok := cm.m[key]
 		if ok {
-			_ = binary.PutUvarint(buf32, imsi)
-			m32.Write(buf32)
-			hll.Add(m32.Sum32())	
+			hll.Add(murmur3.Sum32(buf64))
+			if tt.Unix() == 1395108000 && key == "SAI 204-4-124-1649" {
+				fmt.Printf("Found cell %s, %d, %x\n", key, imsi, buf64)
+			}
 		} else { // not found
 			hll, err := hyperloglog.New(16384)
 			check(err)
-			_ = binary.PutUvarint(buf32, imsi)
-			m32.Write(buf32)
-			hll.Add(m32.Sum32())
+			hll.Add(murmur3.Sum32(buf64))
 			cm.m[key] = hll	
+			if tt.Unix() == 1395108000 && key == "SAI 204-4-124-1649" {
+				fmt.Printf("Create cell %s, %d, %x\n", key, imsi, buf64)
+			}
 		}
 
 		pipeCount += 1
