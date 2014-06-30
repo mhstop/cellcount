@@ -12,7 +12,6 @@ import (
 	"strings"
 	"sort"
 	"strconv"
-	"encoding/binary"
 	"github.com/eclesh/hyperloglog"
 	"github.com/spaolacci/murmur3"
 )
@@ -59,7 +58,9 @@ func searchAndDestroy(cm *CellMap) {
 	
 	// Open output file for Key
 	
-		filename := fmt.Sprintf("/Volumes/BigBud/data/vf/results/%s.csv", cm.f)
+//		filename := fmt.Sprintf("/Volumes/BigBud/data/vf/results/%s.csv", cm.f)
+		filename := fmt.Sprintf("/Users/manuel/Temp/results/%s.csv", cm.f)
+
 	   	file, err := os.Create(filename)
 	   	check(err)
 	   	defer file.Close()
@@ -100,9 +101,6 @@ func listenUp(channel chan *CellMap, count int) {
 
 func processFile(inFile string, cm *CellMap) error {
 
-// Create Hash function
-//	var m32 hash.Hash32 = murmur3.New32()
-	buf64 := make([]byte, 8)
 				
 //	println(">> Processing: ", inFile)
 	file, err := os.Open(inFile) // For read access.
@@ -150,23 +148,15 @@ func processFile(inFile string, cm *CellMap) error {
 		}
 
 		key := row[3] // Cell
-		imsi, _ := strconv.ParseUint(row[2], 10, 64)
-		_ = binary.PutUvarint(buf64, imsi)
-//		m32.Write(buf64)
+//		imsi, _ := strconv.ParseUint(row[2], 10, 64)
 		hll, ok := cm.m[key]
 		if ok {
-			hll.Add(murmur3.Sum32(buf64))
-			if tt.Unix() == 1395108000 && key == "SAI 204-4-124-1649" {
-				fmt.Printf("Found cell %s, %d, %x\n", key, imsi, buf64)
-			}
+			hll.Add(murmur3.Sum32([]byte(row[2])))
 		} else { // not found
-			hll, err := hyperloglog.New(16384)
+			hll, err := hyperloglog.New(4096)
 			check(err)
-			hll.Add(murmur3.Sum32(buf64))
+			hll.Add(murmur3.Sum32([]byte(row[2])))
 			cm.m[key] = hll	
-			if tt.Unix() == 1395108000 && key == "SAI 204-4-124-1649" {
-				fmt.Printf("Create cell %s, %d, %x\n", key, imsi, buf64)
-			}
 		}
 
 		pipeCount += 1
