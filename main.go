@@ -153,7 +153,7 @@ func processFile(inFile string, cm *CellMap) error {
 		if ok {
 			hll.Add(murmur3.Sum32([]byte(row[2])))
 		} else { // not found
-			hll, err := hyperloglog.New(4096)
+			hll, err := hyperloglog.New(8192)
 			check(err)
 			hll.Add(murmur3.Sum32([]byte(row[2])))
 			cm.m[key] = hll	
