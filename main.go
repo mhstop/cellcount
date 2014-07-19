@@ -58,8 +58,8 @@ func searchAndDestroy(cm *CellMap) {
 	
 	// Open output file for Key
 	
-//		filename := fmt.Sprintf("/Volumes/BigBud/data/vf/results/%s.csv", cm.f)
-		filename := fmt.Sprintf("/Users/manuel/Temp/results/%s.csv", cm.f)
+		filename := fmt.Sprintf("/Volumes/BigBud/data/vf/%s.csv", cm.f)
+//		filename := fmt.Sprintf("/Users/manuel/Temp/results/%s.csv", cm.f)
 
 	   	file, err := os.Create(filename)
 	   	check(err)
@@ -140,22 +140,22 @@ func processFile(inFile string, cm *CellMap) error {
 		if pipeCount == 0 {
 		// Optimize in the case of 5mins files take the time of the first line (rounded)
 		// This will break if files contain more than 5 mins splits
-			utime, _ := strconv.ParseInt(row[1], 10, 64)
+			utime, _ := strconv.ParseInt(row[0], 10, 64)
 			t := time.Unix(utime, 0).In(time.UTC)
 			tt = t.Truncate(5 * time.Minute)	
 			_ = tt
 //			set = fmt.Sprintf("set:%d", tt.Unix())
 		}
 
-		key := row[3] // Cell
+		key := row[2] // Cell
 //		imsi, _ := strconv.ParseUint(row[2], 10, 64)
 		hll, ok := cm.m[key]
 		if ok {
-			hll.Add(murmur3.Sum32([]byte(row[2])))
+			hll.Add(murmur3.Sum32([]byte(row[1])))
 		} else { // not found
 			hll, err := hyperloglog.New(8192)
 			check(err)
-			hll.Add(murmur3.Sum32([]byte(row[2])))
+			hll.Add(murmur3.Sum32([]byte(row[1])))
 			cm.m[key] = hll	
 		}
 
@@ -194,7 +194,7 @@ func main() {
 	}
 	 
 	// Recursive walk to get all the csv files
-	filepath.Walk("/Volumes/BigBud/data/vf", func(aPath string, info os.FileInfo, err error) error {
+	filepath.Walk("/Volumes/DATABANK/vf", func(aPath string, info os.FileInfo, err error) error {
 		// fmt.Println(path)
 		if (!info.IsDir() && strings.HasSuffix(info.Name(), ".csv")) {
 			slice := strings.Split(path.Base(aPath), ".")
